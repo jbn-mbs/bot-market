@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["bom1"],
+  "functions": {
+    "api/**/*.ts": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron/health",        "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/smoke",         "schedule": "7 * * * *" },
+    { "path": "/api/cron/seed-audit",    "schedule": "30 20 * * *" },
+    { "path": "/api/cron/morning",       "schedule": "0 4 * * *" },
+    { "path": "/api/cron/nudge",         "schedule": "30 12 * * *" },
+    { "path": "/api/cron/weekly-report", "schedule": "30 4 * * 1" },
+    { "path": "/api/cron/countdown",     "schedule": "45 3 * * *" },
+    { "path": "/api/cron/digest-daily",  "schedule": "0 15 * * *" },
+    { "path": "/api/cron/digest-weekly", "schedule": "30 3 * * 1" }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "jbn-ops-bots",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JBN management automation bots on Telegram (JBN Ops + MBS Institutions)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "invite": "tsx scripts/invite.ts",
+    "import:tracker": "tsx scripts/import-tracker.ts",
+    "set-webhook": "tsx scripts/set-webhook.ts",
+    "dev:poll": "tsx scripts/dev-poll.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "grammy": "^1.46.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "dotenv": "^18.0.10",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
