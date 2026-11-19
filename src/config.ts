@@ -3,7 +3,8 @@ function req(name: string): string {
   if (!v) throw new Error(`Missing env var ${name}`);
   return v;
 }
-const opt = (name: string, fallback = "") => process.env[name] ?? fallback;
+/** Optional env var; unset and empty both fall back (Vercel lets you save blank values). */
+const opt = (name: string, fallback = "") => process.env[name]?.trim() || fallback;
 
 /** Read lazily so tests and scripts can import modules without a full env. */
 export const config = {
@@ -26,5 +27,7 @@ export const config = {
   get githubRepo() { return opt("GITHUB_REPO", "Punyamittal/careerGuide"); },
   get githubWebhookSecret() { return opt("GITHUB_WEBHOOK_SECRET"); },
   get vercelWebhookSecret() { return opt("VERCEL_WEBHOOK_SECRET"); },
+  /** Vercel project names whose deploys are tracked. Empty = all projects in the team. */
+  get vercelProjects() { return opt("VERCEL_PROJECTS").split(",").map((s) => s.trim()).filter(Boolean); },
   get tz() { return opt("TZ_NAME", "Asia/Kolkata"); },
 };

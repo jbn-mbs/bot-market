@@ -1,6 +1,6 @@
 import { Bot, session } from "grammy";
 import { config } from "../config.js";
-import { identify, issueLinkCode, redeemCode, requireRole } from "../core/auth.js";
+import { identify, issueLinkCode, redeemCode, requireRole, UNKNOWN_REPLY } from "../core/auth.js";
 import { supabaseStorage, type BotContext, type Role } from "../core/context.js";
 import { esc } from "../core/format.js";
 import { audit } from "../core/audit.js";
@@ -49,9 +49,13 @@ export function createOpsBot(token = config.opsBotToken) {
   bot.command("start", async (ctx) => {
     const code = ctx.match.trim();
     if (ctx.person && !code) return ctx.reply(`Hi ${ctx.person.name.split(" ")[0]}, you're already linked as ${ctx.person.role}. Try /help.`);
-    if (!code) return; // identify() already sent the "unknown user" line
-    const person = await redeemCode(code, ctx.from!, ctx.chat.id);
-    if (!person) return ctx.reply("That code is invalid, expired or already used. Ask your admin for a new one.");
+    if (!code) return ctx.reply(UNKNOWN_REPLY); // identify() lets a bare /start through without replying
+    const r = await redeemCode(code, ctx.from!, ctx.chat.id);
+    if (!r.ok && r.reason === "already_linked") {
+      return ctx.reply("This Telegram account is already linked to someone else. Ask an admin to unlink it first; your code is still valid.");
+    }
+    if (!r.ok || !r.person) return ctx.reply("That code is invalid, expired or already used. Ask your admin for a new one.");
+    const person = r.person;
     await ctx.api.setMyCommands(menuFor(person.role), { scope: { type: "chat", chat_id: ctx.chat.id } });
     await ctx.reply(`✅ Linked. Welcome, ${person.name}! You're set up as <b>${person.role}</b>.\nTap the menu button or send /help.`, { parse_mode: "HTML" });
   });

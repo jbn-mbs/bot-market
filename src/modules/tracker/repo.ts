@@ -34,16 +34,27 @@ export async function picks(projectId: string) {
     { sector: string; person_id: string; qualification_count: number }[];
 }
 
-/** Active people who can own tracker work, with their Telegram chat if linked. */
-export async function trackerPeople() {
+const TRACKER_ROLES = ["member", "reviewer", "dev"];
+
+/**
+ * Active people in tracker reports, with their Telegram chat if actively linked: everyone in a
+ * tracker role, plus founders/admins who actually own items (they can pick sectors too).
+ */
+export async function trackerPeople(items: Pick<ItemLike, "owner_id">[] = []) {
+  const owners = new Set(items.map((i) => i.owner_id).filter(Boolean));
   const rows = must(await db().from("people")
     .select("id, name, role, tg_users(chat_id, active)")
-    .eq("active", true).in("role", ["member", "reviewer", "dev"])
+    .eq("active", true).in("role", [...TRACKER_ROLES, "founder", "admin"])
     .order("name")) as any[];
-  return rows.map((r) => ({
-    id: r.id as string, name: r.name as string, role: r.role as string,
-    chatId: (Array.isArray(r.tg_users) ? r.tg_users[0] : r.tg_users)?.chat_id as number | undefined,
-  }));
+  return rows
+    .filter((r) => TRACKER_ROLES.includes(r.role) || owners.has(r.id))
+    .map((r) => {
+      const tg = Array.isArray(r.tg_users) ? r.tg_users[0] : r.tg_users;
+      return {
+        id: r.id as string, name: r.name as string, role: r.role as string,
+        chatId: (tg?.active ? tg.chat_id : undefined) as number | undefined,
+      };
+    });
 }
 
 export async function chatIdsForRole(role: string): Promise<number[]> {
@@ -60,11 +71,13 @@ export async function submissionsOnDay(date = localDate()) {
     { by_person: string; qty: number }[];
 }
 
-export async function logSubmission(s: { itemId: string; deliverable: string; by: string; qty: number }) {
-  const rows = must(await db().from("submissions")
-    .insert({ item_id: s.itemId, deliverable: s.deliverable, by_person: s.by, qty: s.qty })
-    .select("id")) as { id: string }[];
-  return rows[0].id;
+/** Insert a submission. Returns null if `clientRef` was already used (a duplicate tap). */
+export async function logSubmission(s: { itemId: string; deliverable: string; by: string; qty: number; clientRef?: string | null }) {
+  const res = await db().from("submissions")
+    .insert({ item_id: s.itemId, deliverable: s.deliverable, by_person: s.by, qty: s.qty, client_ref: s.clientRef ?? null })
+    .select("id");
+  if (res.error?.code === "23505") return null; // unique_violation on client_ref
+  return (must(res) as { id: string }[])[0].id;
 }
 
 export function deliverableLabel(types: DeliverableType[], key: string) {
@@ -89,7 +102,9 @@ export async function savePicks(projectId: string, personId: string, sectors: { 
     must(await db().from("items").update({ owner_id: null }).eq("project_id", projectId).eq("owner_id", personId).in("sector", dropped));
   }
   if (added.length) {
-    must(await db().from("items").update({ owner_id: personId }).eq("project_id", projectId).in("sector", added.map((s) => s.sector)));
+    // Only claim unowned items: a sector imported with mixed owners keeps the other owners' items.
+    must(await db().from("items").update({ owner_id: personId }).eq("project_id", projectId)
+      .in("sector", added.map((s) => s.sector)).is("owner_id", null));
   }
   return { added: added.map((s) => s.sector), dropped };
 }

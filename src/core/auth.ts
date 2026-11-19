@@ -4,7 +4,7 @@ import { db, must } from "../db.js";
 import { audit } from "./audit.js";
 import type { BotContext, Person, Role } from "./context.js";
 
-const UNKNOWN_REPLY =
+export const UNKNOWN_REPLY =
   "Hi! This bot is for the JBN team. If you have a link code from your admin, send /start followed by the code.";
 
 /** Codes are short, unambiguous and single-use. */
@@ -33,23 +33,33 @@ export async function personForTelegram(telegramId: number): Promise<Person | nu
   return { id: p.id, name: p.name, role: p.role, institution_id: p.institution_id };
 }
 
+export type RedeemResult =
+  | { ok: true; person: Person | null }
+  | { ok: false; reason: "invalid" | "already_linked" };
+
 /** Redeem a code: binds this Telegram account to the person the code was issued for. */
-export async function redeemCode(code: string, from: { id: number; username?: string }, chatId: number) {
+export async function redeemCode(code: string, from: { id: number; username?: string }, chatId: number): Promise<RedeemResult> {
   const { data: lc } = await db().from("link_codes").select("*").eq("code", code.trim().toUpperCase()).maybeSingle();
-  if (!lc || lc.used_at || new Date(lc.expires_at) < new Date()) return null;
+  if (!lc || lc.used_at || new Date(lc.expires_at) < new Date()) return { ok: false, reason: "invalid" };
+
+  // One Telegram account = one person. Refuse before claiming, so the code isn't burned.
+  const { data: existing } = await db().from("tg_users").select("person_id").eq("telegram_id", from.id).maybeSingle();
+  if (existing && existing.person_id !== lc.person_id) return { ok: false, reason: "already_linked" };
 
   // Single-use: claim the code atomically before linking.
   const { data: claimed } = await db()
     .from("link_codes").update({ used_at: new Date().toISOString() })
     .eq("code", lc.code).is("used_at", null).select("code");
-  if (!claimed?.length) return null;
+  if (!claimed?.length) return { ok: false, reason: "invalid" };
 
+  // The person may be re-linking from a new Telegram account: drop the old binding first.
+  must(await db().from("tg_users").delete().eq("person_id", lc.person_id).neq("telegram_id", from.id));
   must(await db().from("tg_users").upsert(
     { telegram_id: from.id, person_id: lc.person_id, chat_id: chatId, username: from.username ?? null, active: true, linked_at: new Date().toISOString() },
-    { onConflict: "person_id" },
+    { onConflict: "telegram_id" },
   ));
   await audit(lc.person_id, "link", String(from.id));
-  return personForTelegram(from.id);
+  return { ok: true, person: await personForTelegram(from.id) };
 }
 
 /**

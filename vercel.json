@@ -13,6 +13,7 @@
     { "path": "/api/cron/weekly-report", "schedule": "30 4 * * 1" },
     { "path": "/api/cron/countdown",     "schedule": "45 3 * * *" },
     { "path": "/api/cron/digest-daily",  "schedule": "0 15 * * *" },
-    { "path": "/api/cron/digest-weekly", "schedule": "30 3 * * 1" }
+    { "path": "/api/cron/digest-weekly", "schedule": "30 3 * * 1" },
+    { "path": "/api/cron/cleanup",       "schedule": "0 21 * * *" }
   ]
 }

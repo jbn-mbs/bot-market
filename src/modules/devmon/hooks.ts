@@ -5,7 +5,8 @@ import { db, must } from "../../db.js";
 import { esc } from "../../core/format.js";
 import { recordAndAlert, runSeedAudit } from "./checks.js";
 
-function safeEqual(a: string, b: string) {
+/** Constant-time string comparison for secrets and signatures. */
+export function safeEqual(a: string, b: string) {
   const x = Buffer.from(a), y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
@@ -33,6 +34,19 @@ const VERCEL_STATE: Record<string, string> = {
   "deployment.canceled": "canceled",
 };
 
+/**
+ * GitHub sends either application/json or (the UI default) application/x-www-form-urlencoded
+ * with the JSON in a `payload` field. Accept both.
+ */
+export function parseGithubPayload(raw: string, contentType: string | null): any {
+  if ((contentType ?? "").includes("application/x-www-form-urlencoded")) {
+    const payload = new URLSearchParams(raw).get("payload");
+    if (!payload) throw new Error("form body without payload field");
+    return JSON.parse(payload);
+  }
+  return JSON.parse(raw);
+}
+
 /** Vercel deployment events for team jbn7. Production success also triggers the seed audit. */
 export async function handleVercel(api: Api, evt: any) {
   const state = VERCEL_STATE[evt.type];
@@ -45,7 +59,17 @@ export async function handleVercel(api: Api, evt: any) {
     url: d.url ? `https://${d.url}` : null, branch: meta.githubCommitRef ?? null,
     commit_message: meta.githubCommitMessage ?? null, updated_at: new Date().toISOString(),
   };
-  if (row.id) must(await db().from("deploys").upsert(row));
+  // The team webhook covers every project (including this bot); only track the configured ones.
+  const projects = config.vercelProjects;
+  if (projects.length && !projects.includes(row.project)) return { ignored: `project ${row.project}` };
+
+  // Vercel can send more than one event for the same state (succeeded + ready) and retries on
+  // timeouts. Announce and audit only when the stored state actually changes.
+  if (row.id) {
+    const { data: prev } = await db().from("deploys").select("state").eq("id", row.id).maybeSingle();
+    if (prev?.state === state) return { state, duplicate: true };
+    must(await db().from("deploys").upsert(row));
+  }
 
   const icon = { started: "⏳", ready: "✅", failed: "❌", canceled: "⛔" }[state];
   // Previews are noisy: only announce their failures.

@@ -1,6 +1,6 @@
 import { Composer, InlineKeyboard } from "grammy";
 import type { BotContext } from "../../core/context.js";
-import { esc, signed, table } from "../../core/format.js";
+import { esc, shortHash, signed, table } from "../../core/format.js";
 import { localDate } from "../../core/time.js";
 import { audit } from "../../core/audit.js";
 import { db, must } from "../../db.js";
@@ -107,14 +107,29 @@ tracker.callbackQuery(/^dn:q:([0-9a-f-]{36}):(\w+):(\d+)$/, async (ctx) => {
   await record(ctx, itemId, key, Number(q));
 });
 
+/**
+ * Log a submission. Callback data can be replayed or forged by custom clients, so ownership,
+ * openness and the remaining quantity are re-checked here, and the message id is used as an
+ * idempotency key (unique in the DB) so a double tap logs once.
+ */
 async function record(ctx: BotContext, itemId: string, key: string, qty: number) {
-  const project = await repo.activeProject();
-  const id = await repo.logSubmission({ itemId, deliverable: key, by: ctx.person!.id, qty });
-  await audit(ctx.person!.id, "submission.log", id, { itemId, key, qty });
-  ctx.session.pendingDone = { submissionId: id, expires: Date.now() + 10 * 60_000 };
+  const s = await snapshot();
+  const item = s?.items.find((i) => i.id === itemId);
+  const d = item && openDeliverables(item, s!.project.deliverable_types, s!.done).find((x) => x.key === key);
+  if (!s || !item || item.owner_id !== ctx.person!.id || !d) return ctx.editMessageText("Already complete or not yours.");
+  const n = Math.min(Math.max(1, Math.floor(qty)), d.target - d.done);
+
+  const msg = ctx.callbackQuery?.message;
+  const clientRef = msg ? `${msg.chat.id}:${msg.message_id}` : null;
+  const id = await repo.logSubmission({ itemId, deliverable: key, by: ctx.person!.id, qty: n, clientRef });
+  if (!id) return; // duplicate tap: the first one already logged and edited the message
+
+  await audit(ctx.person!.id, "submission.log", id, { itemId, key, qty: n });
+  const isPrivate = ctx.chat?.type === "private";
+  if (isPrivate) ctx.session.pendingDone = { submissionId: id, expires: Date.now() + 10 * 60_000 };
   await ctx.editMessageText(
-    `✅ Logged <b>${esc(repo.deliverableLabel(project!.deliverable_types, key))}</b>${qty > 1 ? ` ×${qty}` : ""}.\n` +
-      `Send the file now (within 10 minutes) to attach it, or carry on.`,
+    `✅ Logged <b>${esc(d.label)}</b>${n > 1 ? ` ×${n}` : ""}.\n` +
+      (isPrivate ? `Send the file now (within 10 minutes) to attach it, or carry on.` : `To attach a file, use /done in a DM with me.`),
     { parse_mode: "HTML" },
   );
 }
@@ -151,7 +166,8 @@ async function renderSectors(ctx: BotContext, edit: boolean) {
   const kb = new InlineKeyboard();
   sectors.forEach((s, i) => {
     const mark = draft.includes(s.sector) ? "✅ " : s.ownerId && s.ownerId !== ctx.person!.id ? "🔒 " : "";
-    kb.text(`${mark}${s.sector} (${s.count})`.slice(0, 60), `sc:t:${i}`);
+    // Identify the sector by a hash of its name, not its position, so a changed list can't toggle the wrong one.
+    kb.text(`${mark}${s.sector} (${s.count})`.slice(0, 60), `sc:t:${shortHash(s.sector)}`);
     if (i % 2 === 1) kb.row();
   });
   kb.row().text("💾 Save", "sc:save").text("✖ Cancel", "sc:cancel");
@@ -169,11 +185,12 @@ tracker.command("sectors", async (ctx) => {
   await renderSectors(ctx, false);
 });
 
-tracker.callbackQuery(/^sc:t:(\d+)$/, async (ctx) => {
+tracker.callbackQuery(/^sc:t:([0-9a-f]{8})$/, async (ctx) => {
   const project = await repo.activeProject();
-  const sectors = sectorsFromItems(await repo.projectItems(project!.id), await repo.picks(project!.id));
-  const s = sectors[Number(ctx.match[1])];
-  if (!s) return ctx.answerCallbackQuery();
+  if (!project) { await ctx.answerCallbackQuery(); return ctx.editMessageText(NO_PROJECT); }
+  const sectors = sectorsFromItems(await repo.projectItems(project.id), await repo.picks(project.id));
+  const s = sectors.find((x) => shortHash(x.sector) === ctx.match[1]);
+  if (!s) { await ctx.answerCallbackQuery({ text: "The sector list changed. Refreshing…" }); return renderSectors(ctx, true); }
   if (s.ownerId && s.ownerId !== ctx.person!.id) return ctx.answerCallbackQuery({ text: `${s.sector} is already taken.` });
   const draft = new Set(ctx.session.sectorDraft ?? []);
   if (draft.has(s.sector)) draft.delete(s.sector);
@@ -191,7 +208,8 @@ tracker.callbackQuery("sc:cancel", async (ctx) => {
 });
 
 tracker.callbackQuery("sc:save", async (ctx) => {
-  const project = (await repo.activeProject())!;
+  const project = await repo.activeProject();
+  if (!project) { await ctx.answerCallbackQuery(); return ctx.editMessageText(NO_PROJECT); }
   const sectors = sectorsFromItems(await repo.projectItems(project.id), await repo.picks(project.id));
   const draft = ctx.session.sectorDraft ?? [];
   const v = evaluatePick(draft, sectors, ctx.person!.id, project);
@@ -216,7 +234,7 @@ tracker.callbackQuery("sc:save", async (ctx) => {
 export async function statusTable(): Promise<string | null> {
   const s = await snapshot();
   if (!s) return null;
-  const people = await repo.trackerPeople();
+  const people = await repo.trackerPeople(s.items);
   const prog = teamProgress(s.project, s.items, s.subs, localDate(), people.map((p) => p.id));
   const rows = prog
     .map((p) => ({ p, name: people.find((x) => x.id === p.personId)!.name }))

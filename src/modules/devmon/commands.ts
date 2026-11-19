@@ -69,6 +69,11 @@ devmon.command("uatlog", devOnly, async (ctx) => {
 devmon.command("bug", devOnly, async (ctx) => {
   const title = ctx.match.trim();
   if (!title) return ctx.reply("Usage: /bug <one-line description>\nExample: /bug User 3 flow stuck on first question");
+  // With privacy mode on, the bot never sees photos posted in groups, so skip that step there.
+  if (ctx.chat.type !== "private") {
+    ctx.session.pendingBug = { title, step: "await_severity" };
+    return ctx.reply("How severe? (To attach a screenshot, report the bug in a DM with me.)", { reply_markup: severityKeyboard() });
+  }
   ctx.session.pendingBug = { title, step: "await_photo" };
   await ctx.reply("Send a screenshot now, or tap Skip.", {
     reply_markup: new InlineKeyboard().text("Skip screenshot", "bug:skip").text("Cancel", "bug:cancel"),
@@ -110,25 +115,41 @@ devmon.callbackQuery(/^bug:sev:(P[0-3])$/, async (ctx) => {
   const sev = ctx.match[1];
   await ctx.editMessageText("Opening issue…");
 
-  let screenshot = "";
+  // Screenshots stay private: kept in the bot's storage bucket and posted to the dev group,
+  // never as a bearer link in the GitHub issue (which may be public and would expire anyway).
+  let screenshotPath: string | null = null;
   if (b.photoFileId) {
-    const file = await ctx.api.getFile(b.photoFileId);
-    const img = await fetch(`https://api.telegram.org/file/bot${config.opsBotToken}/${file.file_path}`);
-    const path = `bugs/${Date.now()}-${ctx.person!.id}.jpg`;
-    await db().storage.from(config.filesBucket).upload(path, await img.arrayBuffer(), { contentType: "image/jpeg" });
-    const { data } = await db().storage.from(config.filesBucket).createSignedUrl(path, 60 * 60 * 24 * 30);
-    if (data?.signedUrl) screenshot = `\n\n![screenshot](${data.signedUrl})\n_(screenshot link valid 30 days)_`;
+    try {
+      const file = await ctx.api.getFile(b.photoFileId);
+      const img = await fetch(`https://api.telegram.org/file/bot${config.opsBotToken}/${file.file_path}`);
+      if (!img.ok) throw new Error(`telegram file HTTP ${img.status}`);
+      const path = `bugs/${Date.now()}-${ctx.person!.id}.jpg`;
+      const { error } = await db().storage.from(config.filesBucket).upload(path, await img.arrayBuffer(), { contentType: "image/jpeg" });
+      if (error) throw new Error(error.message);
+      screenshotPath = path;
+    } catch (e) {
+      console.error("bug screenshot upload failed", (e as Error).message);
+    }
   }
 
-  const res = await fetch(`https://api.github.com/repos/${config.githubRepo}/issues`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${config.githubToken}`, accept: "application/vnd.github+json", "content-type": "application/json" },
-    body: JSON.stringify({
-      title: `[${sev}] ${b.title}`,
-      body: `Reported via JBN Ops bot by ${ctx.person!.name}.\n\n**Severity:** ${SEVERITY[sev]}${screenshot}`,
-      labels: ["bug", sev],
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/repos/${config.githubRepo}/issues`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.githubToken}`, accept: "application/vnd.github+json", "content-type": "application/json" },
+      body: JSON.stringify({
+        title: `[${sev}] ${b.title}`,
+        body: `Reported via JBN Ops bot by ${ctx.person!.name}.\n\n**Severity:** ${SEVERITY[sev]}` +
+          (b.photoFileId ? `\n\n_A screenshot was attached; it is posted in the JBN Dev group and stored privately by the bot._` : ""),
+        labels: ["bug", sev],
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    // Keep pendingBug so the reporter can tap a severity again instead of retyping.
+    await ctx.editMessageText("Couldn't reach GitHub. Try again:", { reply_markup: severityKeyboard() });
+    return;
+  }
   ctx.session.pendingBug = undefined;
   if (!res.ok) {
     await ctx.editMessageText(`GitHub refused the issue (HTTP ${res.status}). Check the token's Issues permission.`);
@@ -137,7 +158,13 @@ devmon.callbackQuery(/^bug:sev:(P[0-3])$/, async (ctx) => {
   const issue = await res.json();
   must(await db().from("bug_reports").insert({
     github_number: issue.number, url: issue.html_url, severity: sev, title: b.title, reported_by: ctx.person!.id,
+    screenshot_path: screenshotPath,
   }));
+  if (b.photoFileId && config.devGroupId) {
+    await ctx.api.sendPhoto(config.devGroupId, b.photoFileId, {
+      caption: `🐞 #${issue.number} [${sev}] ${b.title}\n${issue.html_url}`.slice(0, 1024),
+    }).catch((e) => console.error("dev group photo failed", e));
+  }
   await audit(ctx.person!.id, "bug.open", issue.html_url, { sev });
   await ctx.editMessageText(`🐞 Opened #${issue.number} (${sev}): ${issue.html_url}`, { link_preview_options: { is_disabled: true } });
 });

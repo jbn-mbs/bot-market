@@ -33,7 +33,7 @@ async function trackerSection(r: Range, prev?: Range): Promise<string> {
   if (!project) return "📋 <b>Team Tracker</b>\nNo active project.";
   const items = await repo.projectItems(project.id);
   const subs = await repo.projectSubmissions(items.map((i) => i.id));
-  const people = await repo.trackerPeople();
+  const people = await repo.trackerPeople(items);
   const prog = teamProgress(project, items, subs, localDate(), people.map((p) => p.id));
   const behind = prog.filter((p) => p.balance < 0).sort((a, b) => a.balance - b.balance);
   const teamBalance = prog.reduce((n, p) => n + p.balance, 0);

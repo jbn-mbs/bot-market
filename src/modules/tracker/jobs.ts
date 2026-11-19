@@ -1,8 +1,8 @@
 import type { Api } from "grammy";
 import { esc } from "../../core/format.js";
-import { daysBetween, localDate } from "../../core/time.js";
+import { localDate } from "../../core/time.js";
 import { config } from "../../config.js";
-import { doneMap, openDeliverables, teamProgress } from "./logic.js";
+import { deadlineView, doneMap, openDeliverables, teamProgress } from "./logic.js";
 import * as repo from "./repo.js";
 import { statusTable } from "./commands.js";
 
@@ -22,7 +22,7 @@ async function load() {
   if (!project) return null;
   const items = await repo.projectItems(project.id);
   const subs = await repo.projectSubmissions(items.map((i) => i.id));
-  return { project, items, subs, done: doneMap(project.deliverable_types, subs), people: await repo.trackerPeople() };
+  return { project, items, subs, done: doneMap(project.deliverable_types, subs), people: await repo.trackerPeople(items) };
 }
 
 /** 09:30 IST: each member gets their open items. */
@@ -77,12 +77,14 @@ export async function weeklyReport(api: Api) {
 export async function countdown(api: Api) {
   const s = await load();
   if (!s) return { sent: 0 };
-  const daysLeft = daysBetween(localDate(), s.project.deadline);
+  // Same count as /deadline (today included), so the two never disagree. 1 = the deadline is today.
+  const { daysLeft } = deadlineView(s.project, 0, 0, localDate());
   if (![7, 3, 1].includes(daysLeft)) return { sent: 0, daysLeft };
   const prog = teamProgress(s.project, s.items, s.subs, localDate(), s.people.map((p) => p.id));
   const behind = prog.filter((p) => p.doneUnits < p.totalUnits)
     .map((p) => `• ${esc(s.people.find((x) => x.id === p.personId)!.name)}: ${p.totalUnits - p.doneUnits} units open`);
-  const text = `⏳ <b>${daysLeft} day${daysLeft > 1 ? "s" : ""} to the ${esc(s.project.name)} deadline</b> (${s.project.deadline})\n\n` +
+  const head = daysLeft === 1 ? `The ${esc(s.project.name)} deadline is today` : `${daysLeft} days left to the ${esc(s.project.name)} deadline`;
+  const text = `⏳ <b>${head}</b> (${s.project.deadline}, today included)\n\n` +
     (behind.length ? behind.join("\n") : "Everyone is complete. 🎉");
   let sent = 0;
   if (config.teamGroupId && (await safeSend(api, config.teamGroupId, text))) sent++;

@@ -64,6 +64,11 @@ const picks = [...bySector.entries()]
   .filter(([, owners]) => owners.size === 1 && [...owners][0])
   .map(([sector, owners]) => ({ project_id: project.id, sector, person_id: [...owners][0]!, qualification_count: items.filter((i) => i.sector === sector).length }));
 if (picks.length) must(await db().from("sector_picks").insert(picks));
+const mixed = [...bySector.entries()].filter(([, owners]) => owners.size > 1).map(([sector]) => sector);
 
 console.log(`Project "${args.name}": ${items.length} qualifications across ${bySector.size} sectors, ${picks.length} sectors pre-assigned.`);
+if (mixed.length) {
+  console.warn(`Sectors with more than one owner (no sector pick created; existing owners keep their items, ` +
+    `whoever picks the sector only gets the unowned ones): ${mixed.join(", ")}`);
+}
 if (unknownOwners.size) console.warn(`Owners not found in bots.people (left unassigned): ${[...unknownOwners].join(", ")}`);

@@ -4,6 +4,8 @@ import { audit } from "../../src/core/audit.js";
 import { recordAndAlert, runHealth, runSeedAudit, runSmoke } from "../../src/modules/devmon/checks.js";
 import { countdown, eveningNudge, morningDm, weeklyReport } from "../../src/modules/tracker/jobs.js";
 import { dailyDigest, sendToFounders, weeklyDigest } from "../../src/modules/digest/digest.js";
+import { safeEqual } from "../../src/modules/devmon/hooks.js";
+import { cleanup } from "../../src/core/cleanup.js";
 
 const JOBS: Record<string, (api: Api) => Promise<unknown>> = {
   health: async (api) => recordAndAlert(api, await runHealth()),
@@ -15,11 +17,12 @@ const JOBS: Record<string, (api: Api) => Promise<unknown>> = {
   countdown,
   "digest-daily": async (api) => sendToFounders(api, await dailyDigest()),
   "digest-weekly": async (api) => sendToFounders(api, await weeklyDigest()),
+  cleanup: async () => cleanup(),
 };
 
 /** Vercel Cron calls GET with Authorization: Bearer $CRON_SECRET. */
 export async function GET(req: Request) {
-  if (req.headers.get("authorization") !== `Bearer ${config.cronSecret}`) {
+  if (!safeEqual(req.headers.get("authorization") ?? "", `Bearer ${config.cronSecret}`)) {
     return new Response("unauthorized", { status: 401 });
   }
   const job = new URL(req.url).pathname.split("/").pop() ?? "";
