@@ -9,6 +9,7 @@ This repo currently holds **Phase 0 + Phase 1** of the **JBN Ops** bot:
 | A · Team Tracker | `/mytasks` `/done` `/sectors` `/status` `/deadline`; 09:30 DM, 18:00 nudge, Monday 10:00 deficit report, 7/3/1-day countdown |
 | B · Dev & Release Monitor | 5-min health checks, hourly smoke test, nightly + post-deploy seed audit, Vercel deploy + GitHub PR/CI notices; `/health` `/deploys` `/bug` `/uat` `/uatlog` |
 | C · Founder Digest | 20:30 daily and Monday 09:00 weekly DM to founders; `/digest` `/weekly` on demand |
+| AI assist (optional) | Short AI headline on the digest; `/ask` for plain-language questions about team progress |
 
 The product being monitored is **careerGUIDE** (`../careerGUIDE`, GitHub `Punyamittal/careerGuide`): Express API under `/api/v1`, Next.js frontend on Vercel.
 
@@ -30,7 +31,7 @@ scripts/               invite, tracker import, set-webhook, local polling
 
 ## Setup
 1. **BotFather**: create the JBN Ops bot, keep privacy mode on. Put the token in `OPS_BOT_TOKEN`.
-2. **Supabase**: run the migrations in order (`001_bots_schema.sql`, `002_fixes.sql`), then add `bots` under *Settings → API → Exposed schemas*. Bot data should live in an India-region project (DPDP; see design doc §7).
+2. **Supabase**: run the migrations in order (`001_bots_schema.sql`, `002_fixes.sql`, `003_ai.sql`), then add `bots` under *Settings → API → Exposed schemas*. Bot data should live in an India-region project (DPDP; see design doc §7).
 3. **Env**: copy `.env.example` to `.env` (local) and into the Vercel project's environment variables.
 4. **Deploy** to Vercel (team jbn7), then `npm run set-webhook -- https://<deployment>`.
    The team must be on **Vercel Pro**: the Hobby plan only allows crons that run once a day, and this project
@@ -42,6 +43,16 @@ scripts/               invite, tracker import, set-webhook, local polling
 8. **Monitor**: create a dedicated MBS test account for `SMOKE_EMAIL`/`SMOKE_PASSWORD`; add a Vercel webhook (deployment events) → `/api/hooks/vercel` and set `VERCEL_PROJECTS` to the careerGUIDE project name(s); add a GitHub webhook (pull requests, workflow runs, issues) on careerGuide → `/api/hooks/github`. Choose content type `application/json` (form-encoded also works).
 
 Bot features that involve files (`/done` attachments, `/bug` screenshots) work in DMs only: with privacy mode on, the bot doesn't see files posted in groups. Bug screenshots are stored in the private bucket and posted to JBN Dev; they are not linked from the GitHub issue.
+
+## AI assist (optional)
+Set `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` to any OpenAI-compatible API (Groq, OpenRouter, Together, or self-hosted Ollama/vLLM) running an open-source model such as Llama 3.1 8B or Qwen3 32B. Leave `LLM_BASE_URL` empty and every AI feature is off; the bot behaves exactly as before.
+
+- **Digest headline**: 2–3 sentences on what changed and who is behind, above the code-computed numbers.
+- **`/ask <question>`**: answers from a text snapshot of the Team Tracker (progress, deadline, sectors, today's logs).
+
+Scope, on purpose: the AI only reads and summarises operations data. It has no tools, can't change data or message anyone, and does no technical work (no bug triage, incident diagnosis or deploy actions). Only first names, sector names and numbers go to the provider.
+
+Cost control: one shared daily token cap (`LLM_DAILY_TOKEN_BUDGET`), a per-person `/ask` limit (`LLM_ASK_PER_DAY`), identical prompts served from a cache (`bots.llm_cache`), and a request timeout (`LLM_TIMEOUT_MS`) after which the bot carries on without AI. Usage is logged per day, person and feature in `bots.llm_usage`.
 
 Local development: `npm run dev:poll` (long polling; removes the webhook, so re-run `set-webhook` afterwards).
 

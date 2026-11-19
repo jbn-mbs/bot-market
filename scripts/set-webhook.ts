@@ -17,6 +17,6 @@ await api.setWebhook(`${base}/api/telegram/ops`, {
 // Default menu for everyone; linked users get a role-specific menu on /start.
 await api.setMyCommands([{ command: "start", description: "Link your account" }, { command: "help", description: "What I can do" }]);
 // Groups: only commands that work there (/sectors and file attachments need a DM; privacy mode hides files in groups).
-const GROUP_OK = new Set(["mytasks", "status", "deadline", "help"]);
+const GROUP_OK = new Set(["mytasks", "status", "deadline", "ask", "help"]);
 await api.setMyCommands(MENU.member.filter((c) => GROUP_OK.has(c.command)), { scope: { type: "all_group_chats" } });
 console.log("Webhook set:", (await api.getWebhookInfo()).url);

@@ -7,6 +7,7 @@ import { audit } from "../core/audit.js";
 import { db, must } from "../db.js";
 import { tracker } from "../modules/tracker/commands.js";
 import { devmon } from "../modules/devmon/commands.js";
+import { assistant } from "../modules/assistant/commands.js";
 import { dailyDigest, weeklyDigest } from "../modules/digest/digest.js";
 
 /** Commands shown in the Telegram menu, per role. */
@@ -17,6 +18,7 @@ const MENU: Record<string, { command: string; description: string }[]> = {
     { command: "sectors", description: "Pick my sectors" },
     { command: "status", description: "Team status and deficits" },
     { command: "deadline", description: "Days left and run-rate" },
+    { command: "ask", description: "Ask about team progress (AI)" },
     { command: "help", description: "What I can do" },
   ],
   dev: [
@@ -83,6 +85,7 @@ export function createOpsBot(token = config.opsBotToken) {
 
   bot.use(tracker);
   bot.use(devmon);
+  bot.use(assistant);
   bot.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
 
   bot.catch(async (err) => {
