@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { overBudget, stripThinking, llmEnabled, complete } from "../src/ai/llm.js";
+import { htmlToText } from "../src/ai/summary.js";
+
+test("htmlToText strips Telegram HTML and unescapes entities", () => {
+  const html = `🌙 <b>JBN daily digest</b>\n• [P1] <a href="https://x/1">Login &amp; signup &lt;broken&gt;</a>\n<pre>Name  Done</pre>`;
+  assert.equal(htmlToText(html), "🌙 JBN daily digest\n• [P1] Login & signup <broken>\nName  Done");
+});
 
 test("stripThinking removes reasoning blocks", () => {
   assert.equal(stripThinking("<think>internal</think>\nAnswer."), "Answer.");

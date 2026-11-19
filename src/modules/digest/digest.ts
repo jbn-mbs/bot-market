@@ -9,6 +9,7 @@ import { addDays, localDate, localMidnightUtc } from "../../core/time.js";
 import { teamProgress } from "../tracker/logic.js";
 import * as repo from "../tracker/repo.js";
 import { safeSend } from "../tracker/jobs.js";
+import { digestHeadline } from "../../ai/summary.js";
 
 type Range = { from: string; to: string; label: string };
 
@@ -68,15 +69,21 @@ async function devSection(r: Range, weekly: boolean): Promise<string> {
   return lines.join("\n");
 }
 
+/** Title, optional AI headline (skipped silently if AI is off or slow), then the computed sections. */
+async function assemble(title: string, sections: string[]): Promise<string> {
+  const headline = await digestHeadline([title, ...sections].join("\n\n"));
+  return [title, ...(headline ? [`🧠 <i>${esc(headline)}</i>`] : []), ...sections].join("\n\n");
+}
+
 export async function dailyDigest(): Promise<string> {
   const r = dayRange();
-  return [`🌙 <b>JBN daily digest</b> · ${r.label}`, await trackerSection(r), await devSection(r, false)].join("\n\n");
+  return assemble(`🌙 <b>JBN daily digest</b> · ${r.label}`, [await trackerSection(r), await devSection(r, false)]);
 }
 
 export async function weeklyDigest(): Promise<string> {
   const r = weekRange(addDays(localDate(), -1)); // Monday morning: the week that just ended
   const prev = weekRange(addDays(localDate(), -1), 1);
-  return [`📅 <b>JBN weekly digest</b> · ${r.label}`, await trackerSection(r, prev), await devSection(r, true)].join("\n\n");
+  return assemble(`📅 <b>JBN weekly digest</b> · ${r.label}`, [await trackerSection(r, prev), await devSection(r, true)]);
 }
 
 export async function sendToFounders(api: Api, text: string) {
