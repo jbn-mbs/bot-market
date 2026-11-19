@@ -30,4 +30,11 @@ export const config = {
   /** Vercel project names whose deploys are tracked. Empty = all projects in the team. */
   get vercelProjects() { return opt("VERCEL_PROJECTS").split(",").map((s) => s.trim()).filter(Boolean); },
   get tz() { return opt("TZ_NAME", "Asia/Kolkata"); },
+  // AI (any OpenAI-compatible API). Leave LLM_BASE_URL empty to turn every AI feature off.
+  get llmBaseUrl() { return opt("LLM_BASE_URL").replace(/\/+$/, ""); },
+  get llmApiKey() { return opt("LLM_API_KEY"); },
+  get llmModel() { return opt("LLM_MODEL"); },
+  get llmDailyTokenBudget() { return Number(opt("LLM_DAILY_TOKEN_BUDGET", "200000")); },
+  get llmAskPerDay() { return Number(opt("LLM_ASK_PER_DAY", "20")); },
+  get llmTimeoutMs() { return Number(opt("LLM_TIMEOUT_MS", "10000")); },
 };
